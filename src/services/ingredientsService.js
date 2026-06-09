@@ -1,55 +1,44 @@
-// src/services/api.js
-
-const API_BASE_URL = 'http://localhost:3000/api';
+import { ref, get, set, remove } from "firebase/database";
+// Adjust this path to point to where you saved your firebase.js file
+import { db } from "../firebase"; 
 
 export const fetchIngredients = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/ingredients`);
+    const snapshot = await get(ref(db, 'ingredients'));
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    if (snapshot.exists()) {
+      // Firebase stores this as an object of objects. 
+      // Object.values() converts it back into the flat array your UI expects.
+      return Object.values(snapshot.val());
     }
-    
-    return await response.json();
+    return []; // Return an empty array if no data exists yet
   } catch (error) {
-    console.error("Could not fetch ingredients:", error);
+    console.error("Could not fetch ingredients from Firebase:", error);
     throw error; 
   }
 };
 
 export const saveIngredients = async (ingredientsArray) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/ingredients`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(ingredientsArray),
+    // Convert the UI array into a keyed object (using the ingredient ID as the key)
+    // This is the safest way to store lists in Firebase Realtime Database
+    const firebasePayload = {};
+    ingredientsArray.forEach((item) => {
+      firebasePayload[item.id] = item;
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    return await response.json();
+    await set(ref(db, 'ingredients'), firebasePayload);
+    return ingredientsArray;
   } catch (error) {
-    console.error("Could not save ingredients:", error);
+    console.error("Could not save ingredients to Firebase:", error);
     throw error;
   }
 };
 
-// New function to handle the DELETE request
 export const deleteIngredient = async (id) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/ingredients/${id}`, {
-      method: 'DELETE',
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    // Returning true indicates success, even if the API sends an empty response body
+    // Target the specific ingredient by its ID and remove it
+    await remove(ref(db, `ingredients/${id}`));
     return true; 
   } catch (error) {
     console.error(`Could not delete ingredient with id ${id}:`, error);

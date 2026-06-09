@@ -1,47 +1,39 @@
-// src/services/mealsService.js
-
-const API_BASE_URL = 'http://localhost:3000/api';
+import { ref, get, set, remove } from "firebase/database";
+// Adjust this path to point to where you saved your firebase.js file
+import { db } from "../firebase"; 
 
 export const fetchMeals = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/meals`);
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    return await response.json();
+    const snapshot = await get(ref(db, 'meals'));
+    
+    if (snapshot.exists()) {
+      return Object.values(snapshot.val());
+    }
+    return [];
   } catch (error) {
-    console.error("Could not fetch meals:", error);
+    console.error("Could not fetch meals from Firebase:", error);
     throw error; 
   }
 };
 
 export const saveMeals = async (mealsArray) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/meals`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(mealsArray),
+    const firebasePayload = {};
+    mealsArray.forEach((meal) => {
+      firebasePayload[meal.id] = meal;
     });
 
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    return await response.json();
+    await set(ref(db, 'meals'), firebasePayload);
+    return mealsArray;
   } catch (error) {
-    console.error("Could not save meals:", error);
+    console.error("Could not save meals to Firebase:", error);
     throw error;
   }
 };
 
-// New function to handle the DELETE request
 export const deleteMeal = async (id) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/meals/${id}`, {
-      method: 'DELETE',
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
+    await remove(ref(db, `meals/${id}`));
     return true; 
   } catch (error) {
     console.error(`Could not delete meal with id ${id}:`, error);
