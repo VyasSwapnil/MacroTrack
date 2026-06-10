@@ -6,20 +6,16 @@ import {
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon } from '@mui/icons-material';
 import AddIngredientDialog from '../components/AddIngredientDialog';
-
-// Import the new delete function
-import { fetchIngredients, saveIngredients, deleteIngredient } from '../services/ingredientsService';
+import { fetchIngredients, saveIngredients, deleteIngredient, updateIngredientAndCascade } from '../services/ingredientsService';
 
 export default function Ingredients() {
   const [ingredients, setIngredients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // States for the Add/Edit Dialog
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingIngredient, setEditingIngredient] = useState(null);
 
-  // States for the Delete Confirmation Dialog
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [ingredientToDelete, setIngredientToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -32,7 +28,7 @@ export default function Ingredients() {
         setIngredients(data);
         setError(null);
       } catch (err) {
-        setError('Failed to load ingredients. Please make sure the server is running.');
+        setError('Failed to load ingredients.');
       } finally {
         setIsLoading(false);
       }
@@ -41,42 +37,37 @@ export default function Ingredients() {
     loadIngredients();
   }, []);
 
+  // UPDATED SAVE LOGIC
   const handleSaveIngredient = async (savedIngredient) => {
-    let updatedList;
     if (editingIngredient) {
-      updatedList = ingredients.map((item) => (item.id === savedIngredient.id ? savedIngredient : item));
+      // 1. If it is an edit, trigger the cascading update to fix Meals and Daily Logs
+      await updateIngredientAndCascade(savedIngredient);
+      
+      // Update local state to reflect the edit instantly
+      setIngredients(ingredients.map((item) => (item.id === savedIngredient.id ? savedIngredient : item)));
     } else {
-      updatedList = [...ingredients, savedIngredient];
+      // 2. If it is a brand new ingredient, just add it normally
+      const updatedList = [...ingredients, savedIngredient];
+      await saveIngredients(updatedList);
+      setIngredients(updatedList);
     }
-
-    await saveIngredients(updatedList);
-    setIngredients(updatedList);
   };
 
-  // Triggered when clicking the trash icon on the list item
   const handleDeleteClick = (ingredient) => {
     setIngredientToDelete(ingredient);
     setIsDeleteDialogOpen(true);
   };
 
-  // Triggered when clicking "Delete" inside the confirmation popup
   const handleConfirmDelete = async () => {
     if (!ingredientToDelete) return;
-
     setIsDeleting(true);
     try {
-      // 1. Call the DELETE API
       await deleteIngredient(ingredientToDelete.id);
-      
-      // 2. Remove the item from the local UI state
       setIngredients(ingredients.filter((item) => item.id !== ingredientToDelete.id));
-      
-      // 3. Close the dialog
       setIsDeleteDialogOpen(false);
       setIngredientToDelete(null);
     } catch (err) {
-      console.error("Failed to delete from DB", err);
-      alert("Failed to delete ingredient. Please try again.");
+      alert("Failed to delete ingredient.");
     } finally {
       setIsDeleting(false);
     }
@@ -101,9 +92,7 @@ export default function Ingredients() {
     <Box sx={{ p: 2 }}>
       <Typography variant="h5" sx={{ mb: 2, fontWeight: 'bold' }}>Ingredients</Typography>
       
-      {error && (
-        <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>
-      )}
+      {error && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
 
       {isLoading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -119,7 +108,6 @@ export default function Ingredients() {
                   <Typography sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
                     {item.name}
                   </Typography>
-                  
                   <Typography variant="body2" color="text.secondary">
                     <Typography component="span" color="primary.main" fontWeight="bold">
                       {item.calories} kcal
@@ -161,28 +149,16 @@ export default function Ingredients() {
         initialData={editingIngredient} 
       />
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog
-        open={isDeleteDialogOpen}
-        onClose={isDeleting ? undefined : handleCancelDelete}
-      >
+      <Dialog open={isDeleteDialogOpen} onClose={isDeleting ? undefined : handleCancelDelete}>
         <DialogTitle sx={{ fontWeight: 'bold' }}>Delete Ingredient</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete <strong>{ingredientToDelete?.name}</strong>? This action cannot be undone.
+            Are you sure you want to delete <strong>{ingredientToDelete?.name}</strong>?
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={handleCancelDelete} color="inherit" disabled={isDeleting}>
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleConfirmDelete} 
-            color="error" 
-            variant="contained" 
-            disabled={isDeleting}
-            startIcon={isDeleting ? <CircularProgress size={20} color="inherit" /> : null}
-          >
+          <Button onClick={handleCancelDelete} color="inherit" disabled={isDeleting}>Cancel</Button>
+          <Button onClick={handleConfirmDelete} color="error" variant="contained" disabled={isDeleting}>
             {isDeleting ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>
