@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 // We will build these two new pages next
 import Today from './pages/Today'; 
@@ -10,7 +10,7 @@ import Users from './pages/Users';
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Today />} />
@@ -20,6 +20,6 @@ export default function App() {
           <Route path="/users" element={<Users />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
