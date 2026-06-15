@@ -2,17 +2,22 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Card, CardContent, List, ListItem, 
   IconButton, Fab, Paper, CircularProgress, Alert, Button, Chip,
-  Dialog, DialogTitle, DialogContent, DialogActions, TableContainer, Table, TableHead, TableRow, TableCell, TableBody, TextField
+  Dialog, DialogTitle, DialogContent, DialogActions, TableContainer, Table, TableHead, TableRow, TableCell, TableBody, TextField, Select, MenuItem, FormControl
 } from '@mui/material';
-import { Add as AddIcon, CheckCircle, Cancel, Edit, Delete } from '@mui/icons-material';
+import { Add as AddIcon, CheckCircle, Cancel, Delete, Person } from '@mui/icons-material';
+import { Grid } from '@mui/material';
+
 import AddDailyMealDialog from '../components/AddDailyMealDialog';
 import { fetchDailyLogs, saveDailyLogs, updateDailyLogMealStatus, deleteDailyLog } from '../services/dailyLogsService';
-import { Grid } from '@mui/material';
+import { fetchUsers } from '../services/usersService';
 
 export default function Today() {
   const today = new Date();
   const formattedDate = today.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  const [users, setUsers] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState('');
 
   const [logs, setLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,10 +27,29 @@ export default function Today() {
   const [deviateMeal, setDeviateMeal] = useState(null);
 
   useEffect(() => {
-    const loadToday = async () => {
+    const initData = async () => {
+      try {
+        const loadedUsers = await fetchUsers();
+        setUsers(loadedUsers);
+        if (loadedUsers.length > 0) {
+          setSelectedUserId(loadedUsers[0].id);
+        } else {
+          setIsLoading(false);
+        }
+      } catch (err) {
+        setError('Failed to load users.');
+        setIsLoading(false);
+      }
+    };
+    initData();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedUserId) return;
+    const loadTodayLogs = async () => {
       try {
         setIsLoading(true);
-        const data = await fetchDailyLogs(dateKey);
+        const data = await fetchDailyLogs(selectedUserId, dateKey);
         setLogs(data);
       } catch (err) {
         setError('Failed to load today\'s plan.');
@@ -33,24 +57,18 @@ export default function Today() {
         setIsLoading(false);
       }
     };
-    loadToday();
-  }, [dateKey]);
+    loadTodayLogs();
+  }, [dateKey, selectedUserId]);
 
-  // --- Calculations ---
   const totals = useMemo(() => {
-    let plannedCals = 0;
-    let plannedPro = 0;
-    let actualCals = 0;
-    let actualPro = 0;
+    let plannedCals = 0; let plannedPro = 0;
+    let actualCals = 0; let actualPro = 0;
 
     logs.forEach(meal => {
-      // Unplanned meals don't count towards the original "Plan" baseline
       if (meal.status !== 'unplanned') {
         plannedCals += (meal.plannedCalories || 0);
         plannedPro += (meal.plannedProtein || 0);
       }
-      
-      // Only "Done", "Unplanned", or "Deviated" meals count towards Actuals
       if (meal.status === 'done' || meal.status === 'unplanned') {
         actualCals += (meal.actualCalories || 0);
         actualPro += (meal.actualProtein || 0);
@@ -58,22 +76,17 @@ export default function Today() {
     });
 
     return {
-      plannedCals, plannedPro,
-      actualCals, actualPro,
+      plannedCals, plannedPro, actualCals, actualPro,
       calVariance: actualCals - plannedCals,
       proVariance: actualPro - plannedPro
     };
   }, [logs]);
 
-  // --- Handlers ---
+  // Pass selectedUserId to all service calls
   const handleMarkDone = async (meal) => {
     try {
-      const updates = { 
-        status: 'done', 
-        actualCalories: meal.plannedCalories, 
-        actualProtein: meal.plannedProtein 
-      };
-      await updateDailyLogMealStatus(dateKey, meal.logId, updates);
+      const updates = { status: 'done', actualCalories: meal.plannedCalories, actualProtein: meal.plannedProtein };
+      await updateDailyLogMealStatus(selectedUserId, dateKey, meal.logId, updates);
       setLogs(logs.map(m => m.logId === meal.logId ? { ...m, ...updates } : m));
     } catch (err) { alert("Failed to update status."); }
   };
@@ -81,57 +94,65 @@ export default function Today() {
   const handleCancelMeal = async (meal) => {
     try {
       const updates = { status: 'cancelled', actualCalories: 0, actualProtein: 0 };
-      await updateDailyLogMealStatus(dateKey, meal.logId, updates);
+      await updateDailyLogMealStatus(selectedUserId, dateKey, meal.logId, updates);
       setLogs(logs.map(m => m.logId === meal.logId ? { ...m, ...updates } : m));
     } catch (err) { alert("Failed to cancel meal."); }
   };
 
   const handleDeleteUnplanned = async (logId) => {
     try {
-      await deleteDailyLog(dateKey, logId);
+      await deleteDailyLog(selectedUserId, dateKey, logId);
       setLogs(logs.filter(m => m.logId !== logId));
     } catch (err) { alert("Failed to delete meal."); }
   };
 
   const handleAddUnplannedMeals = async (selectedMeals) => {
+    if (!selectedUserId) { alert("Please select a user first."); return; }
     const newLogs = selectedMeals.map((meal) => ({
-      ...meal,
-      logId: `${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      status: 'unplanned', 
-      plannedCalories: 0,
-      plannedProtein: 0,
-      actualCalories: meal.calories,
-      actualProtein: meal.protein
+      ...meal, logId: `${Date.now()}-${Math.floor(Math.random() * 1000)}`, status: 'unplanned', 
+      plannedCalories: 0, plannedProtein: 0, actualCalories: meal.calories, actualProtein: meal.protein
     }));
-    
     try {
       const updatedList = [...logs, ...newLogs];
-      await saveDailyLogs(dateKey, updatedList);
+      await saveDailyLogs(selectedUserId, dateKey, updatedList);
       setLogs(updatedList);
-    } catch (err) { alert("Failed to add unplanned meals."); }
+    } catch (err) { alert("Failed to add meals."); }
   };
 
   const handleSaveDeviation = async (logId, newActualCals, newActualPro, updatedIngredients) => {
     try {
-      const updates = { 
-        status: 'done', 
-        actualCalories: newActualCals, 
-        actualProtein: newActualPro,
-        ingredients: updatedIngredients
-      };
-      await updateDailyLogMealStatus(dateKey, logId, updates);
+      const updates = { status: 'done', actualCalories: newActualCals, actualProtein: newActualPro, ingredients: updatedIngredients };
+      await updateDailyLogMealStatus(selectedUserId, dateKey, logId, updates);
       setLogs(logs.map(m => m.logId === logId ? { ...m, ...updates } : m));
       setDeviateMeal(null);
     } catch (err) { alert("Failed to save deviation."); }
   };
 
+  if (users.length === 0 && !isLoading) {
+    return (
+      <Box sx={{ p: 2, textAlign: 'center' }}>
+        <Typography variant="h6" sx={{ mt: 4 }}>No Users Found</Typography>
+        <Typography color="text.secondary">Head over to the Users tab to create a profile first.</Typography>
+      </Box>
+    );
+  }
+
   return (
     <Box sx={{ p: 2 }}>
-      <Typography variant="h5" sx={{ mb: 2, fontWeight: 'bold' }}>Today, {formattedDate}</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5" sx={{ fontWeight: 'bold' }}>Today, {formattedDate}</Typography>
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <Select value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}
+            sx={{ bgcolor: 'white', borderRadius: 2, '& .MuiSelect-select': { py: 1, display: 'flex', alignItems: 'center' } }}>
+            {users.map(u => (
+              <MenuItem key={u.id} value={u.id}><Person fontSize="small" sx={{ mr: 1 }}/> {u.name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      {/* Summary Dashboard */}
       <Card sx={{ mb: 3, borderRadius: 3, boxShadow: 2 }}>
         <CardContent>
           <Grid container spacing={2}>
@@ -158,7 +179,6 @@ export default function Today() {
         </CardContent>
       </Card>
 
-      {/* Meals List */}
       <Typography variant="h6" sx={{ mb: 1, fontWeight: 'bold' }}>Your Meals</Typography>
       
       {isLoading ? (
@@ -181,13 +201,9 @@ export default function Today() {
                       }
                     </Typography>
                   </Box>
-
-                  {/* Dynamic Status Badges */}
                   {meal.status === 'done' && <Chip icon={<CheckCircle />} label="Done" color="success" size="small" variant="outlined" />}
                   {meal.status === 'cancelled' && <Chip icon={<Cancel />} label="Cancelled" color="error" size="small" variant="outlined" />}
                 </Box>
-
-                {/* Action Buttons */}
                 <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                   {meal.status === 'planned' && (
                     <>
@@ -197,14 +213,11 @@ export default function Today() {
                     </>
                   )}
                   {meal.status === 'unplanned' && (
-                    <Button size="small" variant="outlined" color="error" startIcon={<Delete />} onClick={() => handleDeleteUnplanned(meal.logId)}>
-                      Remove
-                    </Button>
+                    <Button size="small" variant="outlined" color="error" startIcon={<Delete />} onClick={() => handleDeleteUnplanned(meal.logId)}>Remove</Button>
                   )}
                 </Box>
               </ListItem>
             ))}
-
             {logs.length === 0 && (
               <ListItem sx={{ py: 3, justifyContent: 'center' }}>
                 <Typography color="text.secondary">Nothing planned or logged yet.</Typography>
@@ -214,51 +227,30 @@ export default function Today() {
         </Paper>
       )}
 
-      {/* Floating Action Button for Unplanned Meals */}
-      <Fab color="primary" sx={{ position: 'fixed', bottom: 80, right: 16 }} onClick={() => setIsAddDialogOpen(true)}>
+      <Fab color="primary" sx={{ position: 'fixed', bottom: 80, right: 16 }} onClick={() => setIsAddDialogOpen(true)} disabled={!selectedUserId}>
         <AddIcon />
       </Fab>
 
       <AddDailyMealDialog open={isAddDialogOpen} onClose={() => setIsAddDialogOpen(false)} onAdd={handleAddUnplannedMeals} />
-      
-      {deviateMeal && (
-        <DeviateDialog meal={deviateMeal} onClose={() => setDeviateMeal(null)} onSave={handleSaveDeviation} />
-      )}
+      {deviateMeal && <DeviateDialog meal={deviateMeal} onClose={() => setDeviateMeal(null)} onSave={handleSaveDeviation} />}
     </Box>
   );
 }
 
-// --- Inline Deviate Dialog Component ---
+// Inline Deviate Dialog Component (Unchanged from previous logic)
 function DeviateDialog({ meal, onClose, onSave }) {
-  // Local state to track modified quantities
   const [ingredients, setIngredients] = useState(meal.ingredients || []);
-
-  const handleQtyChange = (id, newQty) => {
-    setIngredients(prev => prev.map(item => item.id === id ? { ...item, quantity: newQty } : item));
-  };
-
+  const handleQtyChange = (id, newQty) => setIngredients(prev => prev.map(item => item.id === id ? { ...item, quantity: newQty } : item));
   const getCalculatedMacros = (item) => {
     const qty = parseFloat(item.quantity) || 0; 
     const multiplier = item.measurementType === 'count' ? qty : (qty / 100);
-    return {
-      calories: parseFloat((item.calories * multiplier).toFixed(1)),
-      protein: parseFloat((item.protein * multiplier).toFixed(1))
-    };
+    return { calories: parseFloat((item.calories * multiplier).toFixed(1)), protein: parseFloat((item.protein * multiplier).toFixed(1)) };
   };
-
   const handleSave = () => {
-    let totalCals = 0;
-    let totalPro = 0;
-    
-    ingredients.forEach(item => {
-      const macros = getCalculatedMacros(item);
-      totalCals += macros.calories;
-      totalPro += macros.protein;
-    });
-
+    let totalCals = 0; let totalPro = 0;
+    ingredients.forEach(item => { const macros = getCalculatedMacros(item); totalCals += macros.calories; totalPro += macros.protein; });
     onSave(meal.logId, parseFloat(totalCals.toFixed(1)), parseFloat(totalPro.toFixed(1)), ingredients);
   };
-
   return (
     <Dialog open={true} onClose={onClose} fullWidth maxWidth="sm">
       <DialogTitle sx={{ fontWeight: 'bold' }}>Deviate: {meal.name}</DialogTitle>
@@ -266,34 +258,16 @@ function DeviateDialog({ meal, onClose, onSave }) {
         <Alert severity="info" sx={{ mt: 1, mb: 2 }}>Update the quantities to reflect what you actually ate.</Alert>
         <TableContainer component={Paper} variant="outlined">
           <Table size="small">
-            <TableHead sx={{ bgcolor: '#f5f5f5' }}>
-              <TableRow>
-                <TableCell>Ingredient</TableCell>
-                <TableCell align="center" sx={{ width: '100px' }}>Actual Qty</TableCell>
-              </TableRow>
-            </TableHead>
+            <TableHead sx={{ bgcolor: '#f5f5f5' }}><TableRow><TableCell>Ingredient</TableCell><TableCell align="center" sx={{ width: '100px' }}>Actual Qty</TableCell></TableRow></TableHead>
             <TableBody>
               {ingredients.map(item => (
-                <TableRow key={item.id}>
-                  <TableCell>{item.name}</TableCell>
-                  <TableCell align="center">
-                    <TextField
-                      variant="standard" type="number"
-                      value={item.quantity}
-                      onChange={(e) => handleQtyChange(item.id, e.target.value)}
-                      InputProps={{ inputProps: { min: 0 } }}
-                    />
-                  </TableCell>
-                </TableRow>
+                <TableRow key={item.id}><TableCell>{item.name}</TableCell><TableCell align="center"><TextField variant="standard" type="number" value={item.quantity} onChange={(e) => handleQtyChange(item.id, e.target.value)} InputProps={{ inputProps: { min: 0 } }} /></TableCell></TableRow>
               ))}
             </TableBody>
           </Table>
         </TableContainer>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} color="inherit">Cancel</Button>
-        <Button onClick={handleSave} variant="contained" color="primary">Save Actuals</Button>
-      </DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={onClose} color="inherit">Cancel</Button><Button onClick={handleSave} variant="contained" color="primary">Save Actuals</Button></DialogActions>
     </Dialog>
   );
 }

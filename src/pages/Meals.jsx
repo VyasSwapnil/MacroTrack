@@ -14,6 +14,7 @@ import { fetchMeals, saveMeals, deleteMeal } from '../services/mealsService';
 import AddMealDialog from '../components/AddMealDialog';
 // 1. Import the View component
 import ViewMealDialog from '../components/ViewMealDialog';
+import { updateMealAndCascade } from '../services/ingredientsService';
 
 export default function Meals() {
   const [meals, setMeals] = useState([]);
@@ -50,15 +51,19 @@ export default function Meals() {
     loadMeals();
   }, []);
 
-  const handleSaveMeal = async (savedMeal) => {
-    let updatedList;
+const handleSaveMeal = async (savedMeal) => {
     if (editingMeal) {
-      updatedList = meals.map((m) => (m.id === savedMeal.id ? savedMeal : m));
+      // 1. If it is an edit, trigger the new cascading update
+      await updateMealAndCascade(savedMeal);
+      
+      // Update local state instantly
+      setMeals(meals.map((item) => (item.id === savedMeal.id ? savedMeal : item)));
     } else {
-      updatedList = [...meals, savedMeal];
+      // 2. If it is a brand new meal, add it normally (assuming saveMeals is your current function)
+      const updatedList = [...meals, savedMeal];
+      await saveMeals(updatedList);
+      setMeals(updatedList);
     }
-    await saveMeals(updatedList);
-    setMeals(updatedList);
   };
 
   const handleEditClick = (meal) => {

@@ -1,9 +1,11 @@
 import { ref, get, set, remove, update } from "firebase/database";
 import { db } from "../firebase"; 
 
-export const fetchDailyLogs = async (dateKey) => {
+// Target specific user's logs
+export const fetchDailyLogs = async (userId, dateKey) => {
+  if (!userId) return [];
   try {
-    const snapshot = await get(ref(db, `dailyLogs/${dateKey}`));
+    const snapshot = await get(ref(db, `dailyLogs/${userId}/${dateKey}`));
     if (snapshot.exists()) {
       return Object.values(snapshot.val());
     }
@@ -14,14 +16,13 @@ export const fetchDailyLogs = async (dateKey) => {
   }
 };
 
-export const saveDailyLogs = async (dateKey, logsArray) => {
+export const saveDailyLogs = async (userId, dateKey, logsArray) => {
   try {
     const firebasePayload = {};
     logsArray.forEach((log) => {
       firebasePayload[log.logId] = log;
     });
-
-    await set(ref(db, `dailyLogs/${dateKey}`), firebasePayload);
+    await set(ref(db, `dailyLogs/${userId}/${dateKey}`), firebasePayload);
     return logsArray;
   } catch (error) {
     console.error("Could not save daily logs:", error);
@@ -29,15 +30,12 @@ export const saveDailyLogs = async (dateKey, logsArray) => {
   }
 };
 
-// NEW: Granular update function for marking meals as Done, Cancelled, or Deviated
-export const updateDailyLogMealStatus = async (dateKey, logId, updatesToApply) => {
+export const updateDailyLogMealStatus = async (userId, dateKey, logId, updatesToApply) => {
   try {
     const updates = {};
-    // We target the specific fields inside the specific meal object
     Object.keys(updatesToApply).forEach(key => {
-      updates[`dailyLogs/${dateKey}/${logId}/${key}`] = updatesToApply[key];
+      updates[`dailyLogs/${userId}/${dateKey}/${logId}/${key}`] = updatesToApply[key];
     });
-    
     await update(ref(db), updates);
     return true;
   } catch (error) {
@@ -46,9 +44,9 @@ export const updateDailyLogMealStatus = async (dateKey, logId, updatesToApply) =
   }
 };
 
-export const deleteDailyLog = async (dateKey, logId) => {
+export const deleteDailyLog = async (userId, dateKey, logId) => {
   try {
-    await remove(ref(db, `dailyLogs/${dateKey}/${logId}`));
+    await remove(ref(db, `dailyLogs/${userId}/${dateKey}/${logId}`));
     return true; 
   } catch (error) {
     console.error(`Could not delete log:`, error);
@@ -56,12 +54,12 @@ export const deleteDailyLog = async (dateKey, logId) => {
   }
 };
 
+// Fetches all logs for ALL users to populate the Planner summary
 export const fetchAllDailyLogs = async () => {
   try {
-    // Fetches the entire dailyLogs node
     const snapshot = await get(ref(db, 'dailyLogs'));
     if (snapshot.exists()) {
-      return snapshot.val(); // Returns an object with dateKeys as properties
+      return snapshot.val(); 
     }
     return {};
   } catch (error) {

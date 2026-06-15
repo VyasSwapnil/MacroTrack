@@ -14,7 +14,6 @@ export const fetchIngredients = async () => {
   }
 };
 
-// Used for adding new ingredients or bulk saves
 export const saveIngredients = async (ingredientsArray) => {
   try {
     const firebasePayload = {};
@@ -39,97 +38,211 @@ export const deleteIngredient = async (id) => {
   }
 };
 
-// NEW FUNCTION: Updates the ingredient and recalculates all downstream meals and logs
+// UPDATED CASCADE FUNCTION: Now perfectly handles 'Done' and 'Cancelled' planned baselines
 export const updateIngredientAndCascade = async (updatedIngredient) => {
   try {
     const updates = {};
-
-    // 1. Queue the update for the main ingredient list
     updates[`ingredients/${updatedIngredient.id}`] = updatedIngredient;
 
-    // Helper function to recalculate a meal/log's total macros based on its ingredient list
     const recalculateTotals = (ingredientsList) => {
-      let totalCals = 0;
-      let totalPro = 0;
+      let totalCals = 0; let totalPro = 0;
       ingredientsList.forEach(ing => {
-        const multiplier = (parseFloat(ing.quantity) || 0) / 100;
+        const qty = parseFloat(ing.quantity) || 0;
+        const multiplier = ing.measurementType === 'count' ? qty : (qty / 100);
         totalCals += parseFloat((ing.calories * multiplier).toFixed(1));
         totalPro += parseFloat((ing.protein * multiplier).toFixed(1));
       });
-      return {
-        calories: parseFloat(totalCals.toFixed(1)),
-        protein: parseFloat(totalPro.toFixed(1))
-      };
+      return { calories: parseFloat(totalCals.toFixed(1)), protein: parseFloat(totalPro.toFixed(1)) };
     };
 
-    // 2. Fetch meals, check if they contain the updated ingredient, and recalculate
+    // Update global meal templates
     const mealsSnapshot = await get(ref(db, 'meals'));
     if (mealsSnapshot.exists()) {
       const meals = mealsSnapshot.val();
       Object.keys(meals).forEach(mealId => {
         const meal = meals[mealId];
         let mealModified = false;
-
         if (meal.ingredients) {
           meal.ingredients = meal.ingredients.map(ing => {
             if (ing.id === updatedIngredient.id) {
               mealModified = true;
-              return {
-                ...ing,
-                name: updatedIngredient.name, 
-                calories: updatedIngredient.calories,
-                protein: updatedIngredient.protein
-              };
+              return { ...ing, name: updatedIngredient.name, calories: updatedIngredient.calories, protein: updatedIngredient.protein, measurementType: updatedIngredient.measurementType || '100g' };
             }
             return ing;
           });
-
           if (mealModified) {
             const newTotals = recalculateTotals(meal.ingredients);
             meal.calories = newTotals.calories;
             meal.protein = newTotals.protein;
-            updates[`meals/${mealId}`] = meal; // Queue the meal update
+            updates[`meals/${mealId}`] = meal; 
           }
         }
       });
     }
 
-    // 3. Fetch daily logs, check if they contain the ingredient, and recalculate
+    // Update all users' daily logs
     const logsSnapshot = await get(ref(db, 'dailyLogs'));
     if (logsSnapshot.exists()) {
-      const dailyLogs = logsSnapshot.val();
-      Object.keys(dailyLogs).forEach(dateKey => {
-        const logsForDate = dailyLogs[dateKey];
-        Object.keys(logsForDate).forEach(logId => {
-          const log = logsForDate[logId];
-          let logModified = false;
+      const allUsersLogs = logsSnapshot.val();
+      Object.keys(allUsersLogs).forEach(userId => {
+        const userDates = allUsersLogs[userId];
+        Object.keys(userDates).forEach(dateKey => {
+          const logsForDate = userDates[dateKey];
+          Object.keys(logsForDate).forEach(logId => {
+            const log = logsForDate[logId];
+            let logModified = false;
 
-          if (log.ingredients) {
-            log.ingredients = log.ingredients.map(ing => {
-              if (ing.id === updatedIngredient.id) {
-                logModified = true;
-                return {
-                  ...ing,
-                  name: updatedIngredient.name,
-                  calories: updatedIngredient.calories,
-                  protein: updatedIngredient.protein
-                };
+            if (log.ingredients) {
+              // Capture pre-update macros to check if the user had manually deviated the meal
+              const oldActualCals = log.actualCalories || 0;
+              const oldActualPro = log.actualProtein || 0;
+              const oldPlannedCals = log.plannedCalories || 0;
+              const oldPlannedPro = log.plannedProtein || 0;
+              
+              const isDeviated = (log.status === 'done' && (oldPlannedCals !== oldActualCals || oldPlannedPro !== oldActualPro));
+
+              log.ingredients = log.ingredients.map(ing => {
+                if (ing.id === updatedIngredient.id) {
+                  logModified = true;
+                  return { ...ing, name: updatedIngredient.name, calories: updatedIngredient.calories, protein: updatedIngredient.protein, measurementType: updatedIngredient.measurementType || '100g' };
+                }
+                return ing;
+              });
+
+              if (logModified) {
+                const newTotals = recalculateTotals(log.ingredients);
+                
+                log.calories = newTotals.calories;
+                log.protein = newTotals.protein;
+
+                // Apply the new totals differently depending on the meal's status
+                if (log.status === 'planned' || log.status === 'cancelled') {
+                   // Only the plan changes
+                   log.plannedCalories = newTotals.calories;
+                   log.plannedProtein = newTotals.protein;
+                } else if (log.status === 'unplanned') {
+                   // Only the actuals change
+                   log.actualCalories = newTotals.calories;
+                   log.actualProtein = newTotals.protein;
+                } else if (log.status === 'done') {
+                   if (!isDeviated) {
+                       // If they ate exactly what was planned, update both identically
+                       log.plannedCalories = newTotals.calories;
+                       log.plannedProtein = newTotals.protein;
+                       log.actualCalories = newTotals.calories;
+                       log.actualProtein = newTotals.protein;
+                   } else {
+                       // If they deviated, the new totals represent the ACTUAL new calories.
+                       // We mathematically adjust the original plan by the difference the ingredient made.
+                       const calDelta = newTotals.calories - oldActualCals;
+                       const proDelta = newTotals.protein - oldActualPro;
+                       
+                       log.actualCalories = newTotals.calories;
+                       log.actualProtein = newTotals.protein;
+                       log.plannedCalories = Math.max(0, parseFloat((oldPlannedCals + calDelta).toFixed(1)));
+                       log.plannedProtein = Math.max(0, parseFloat((oldPlannedPro + proDelta).toFixed(1)));
+                   }
+                }
+                
+                updates[`dailyLogs/${userId}/${dateKey}/${logId}`] = log; 
               }
-              return ing;
-            });
-
-            if (logModified) {
-              const newTotals = recalculateTotals(log.ingredients);
-              log.calories = newTotals.calories;
-              log.protein = newTotals.protein;
-              updates[`dailyLogs/${dateKey}/${logId}`] = log; // Queue the log update
             }
-          }
+          });
         });
       });
     }
 
-    // 4. Execute all updates across the database simultaneously
+    await update(ref(db), updates);
+    return true;
+
+  } catch (error) {
+    console.error("Cascade update failed:", error);
+    throw error;
+  }
+};
+
+
+export const updateMealAndCascade = async (updatedMeal) => {
+  try {
+    const updates = {};
+    
+    // 1. Update the master meal template
+    updates[`meals/${updatedMeal.id}`] = updatedMeal;
+
+    // 2. Fetch all users' daily logs
+    const logsSnapshot = await get(ref(db, 'dailyLogs'));
+    
+    if (logsSnapshot.exists()) {
+      const allUsersLogs = logsSnapshot.val();
+
+      // Loop through Users
+      Object.keys(allUsersLogs).forEach(userId => {
+        const userDates = allUsersLogs[userId];
+        
+        // Loop through Dates
+        Object.keys(userDates).forEach(dateKey => {
+          const logsForDate = userDates[dateKey];
+          
+          // Loop through individual Meals
+          Object.keys(logsForDate).forEach(logId => {
+            const log = logsForDate[logId];
+
+            // Check if this logged item is an instance of the meal we are updating
+            // Note: log.id represents the original meal template ID, while log.logId is the unique daily instance
+            if (log.id === updatedMeal.id) {
+              
+              const oldActualCals = log.actualCalories || 0;
+              const oldActualPro = log.actualProtein || 0;
+              const oldPlannedCals = log.plannedCalories || 0;
+              const oldPlannedPro = log.plannedProtein || 0;
+              
+              // Check if the user had manually deviated this specific meal while eating it
+              const isDeviated = (log.status === 'done' && (oldPlannedCals !== oldActualCals || oldPlannedPro !== oldActualPro));
+
+              // Update the core meal data
+              log.name = updatedMeal.name;
+              log.ingredients = updatedMeal.ingredients;
+              log.calories = updatedMeal.calories;
+              log.protein = updatedMeal.protein;
+
+              const newCals = updatedMeal.calories;
+              const newPro = updatedMeal.protein;
+
+              // Apply the new totals based on the meal's current status
+              if (log.status === 'planned' || log.status === 'cancelled') {
+                 log.plannedCalories = newCals;
+                 log.plannedProtein = newPro;
+              } else if (log.status === 'unplanned') {
+                 log.actualCalories = newCals;
+                 log.actualProtein = newPro;
+              } else if (log.status === 'done') {
+                 if (!isDeviated) {
+                     // They ate exactly what was planned, so update both identically
+                     log.plannedCalories = newCals;
+                     log.plannedProtein = newPro;
+                     log.actualCalories = newCals;
+                     log.actualProtein = newPro;
+                 } else {
+                     // They deviated. We update the plan, but adjust the actuals by the difference the template change made
+                     const calDelta = newCals - oldPlannedCals;
+                     const proDelta = newPro - oldPlannedPro;
+                     
+                     log.plannedCalories = newCals;
+                     log.plannedProtein = newPro;
+                     log.actualCalories = Math.max(0, parseFloat((oldActualCals + calDelta).toFixed(1)));
+                     log.actualProtein = Math.max(0, parseFloat((oldActualPro + proDelta).toFixed(1)));
+                 }
+              }
+              
+              // Queue the update for this specific daily log
+              updates[`dailyLogs/${userId}/${dateKey}/${logId}`] = log; 
+            }
+          });
+        });
+      });
+    }
+
+    // Execute the massive update across the entire database simultaneously
     await update(ref(db), updates);
     return true;
 

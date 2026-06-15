@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, Button, Box, CircularProgress, Autocomplete,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, InputAdornment, Chip
 } from '@mui/material';
 import { fetchIngredients } from '../services/ingredientsService';
 
@@ -15,7 +15,6 @@ export default function AddMealDialog({ open, onClose, onSave, initialData }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // 1. Fetch ingredients and pre-fill data when the dialog opens
   useEffect(() => {
     if (open) {
       const loadIngredients = async () => {
@@ -31,7 +30,6 @@ export default function AddMealDialog({ open, onClose, onSave, initialData }) {
       };
       loadIngredients();
 
-      // Pre-fill the form if we are editing an existing meal
       if (initialData) {
         setName(initialData.name);
         setSelectedIngredients(initialData.ingredients || []);
@@ -43,7 +41,8 @@ export default function AddMealDialog({ open, onClose, onSave, initialData }) {
 
   const getCalculatedMacros = (item) => {
     const qty = parseFloat(item.quantity) || 0; 
-    const multiplier = qty / 100;
+    const isCount = item.measurementType === 'count';
+    const multiplier = isCount ? qty : (qty / 100);
     
     return {
       calories: parseFloat((item.calories * multiplier).toFixed(1)),
@@ -93,10 +92,10 @@ export default function AddMealDialog({ open, onClose, onSave, initialData }) {
       name: item.name,
       quantity: parseFloat(item.quantity),
       calories: item.calories,
-      protein: item.protein
+      protein: item.protein,
+      measurementType: item.measurementType || '100g' 
     }));
 
-    // 2. Preserve the original ID if editing, otherwise generate a new one
     const newMeal = {
       id: initialData ? initialData.id : Date.now(),
       name: name.trim(),
@@ -155,19 +154,33 @@ export default function AddMealDialog({ open, onClose, onSave, initialData }) {
             multiple
             options={availableIngredients}
             getOptionLabel={(option) => option.name}
-            // Add this to prevent warnings when comparing saved data with fetched data
             isOptionEqualToValue={(option, value) => option.id === value.id}
             value={selectedIngredients}
             onChange={(event, newValue) => {
               const updatedSelection = newValue.map(item => {
                 const existing = selectedIngredients.find(i => i.id === item.id);
-                return existing ? existing : { ...item, quantity: '100' };
+                const defaultQty = item.measurementType === 'count' ? '1' : '100';
+                return existing ? existing : { ...item, quantity: defaultQty };
               });
               setSelectedIngredients(updatedSelection);
               if (error) setError('');
             }}
             loading={isLoadingIngredients}
             disabled={isSubmitting}
+            renderOption={(props, option) => (
+              <li {...props} key={option.id}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                  <Typography>{option.name}</Typography>
+                  <Chip 
+                    label={option.measurementType === 'count' ? 'Count' : '100g'} 
+                    size="small" 
+                    variant="outlined" 
+                    color={option.measurementType === 'count' ? 'secondary' : 'default'}
+                    sx={{ fontSize: '0.7rem', height: '20px' }}
+                  />
+                </Box>
+              </li>
+            )}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -193,7 +206,7 @@ export default function AddMealDialog({ open, onClose, onSave, initialData }) {
                 <TableHead sx={{ bgcolor: '#f5f5f5' }}>
                   <TableRow>
                     <TableCell sx={{ fontWeight: 'bold' }}>Ingredient</TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 'bold', width: '100px' }}>Qty (g)</TableCell>
+                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Quantity</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 'bold' }}>Cals</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 'bold' }}>Protein</TableCell>
                   </TableRow>
@@ -201,19 +214,32 @@ export default function AddMealDialog({ open, onClose, onSave, initialData }) {
                 <TableBody>
                   {selectedIngredients.map((row) => {
                     const calculated = getCalculatedMacros(row);
+                    const isCount = row.measurementType === 'count';
+
                     return (
                       <TableRow key={row.id}>
-                        <TableCell>{row.name}</TableCell>
+                        {/* Cleaned up: Just the ingredient name here now */}
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {row.name}
+                          </Typography>
+                        </TableCell>
                         <TableCell align="center">
-                          <TextField
-                            variant="standard"
-                            type="number"
-                            value={row.quantity}
-                            onChange={(e) => handleQuantityChange(row.id, e.target.value)}
-                            InputProps={{ inputProps: { min: 0 } }}
-                            sx={{ width: '70px' }}
-                            disabled={isSubmitting}
-                          />
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                            <TextField
+                              variant="outlined"
+                              size="small"
+                              type="number"
+                              value={row.quantity}
+                              onChange={(e) => handleQuantityChange(row.id, e.target.value)}
+                              inputProps={{ min: 0, style: { textAlign: 'center', padding: '6px' } }}
+                              sx={{ width: '100px' }}
+                              disabled={isSubmitting}
+                            />
+                            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 'bold' }}>
+                              {isCount ? 'x' : 'g'}
+                            </Typography>
+                          </Box>
                         </TableCell>
                         <TableCell align="right">{calculated.calories}</TableCell>
                         <TableCell align="right">{calculated.protein}g</TableCell>

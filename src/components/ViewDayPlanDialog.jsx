@@ -2,22 +2,21 @@ import React, { useMemo } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Box, Table, TableBody, TableCell, TableContainer, 
-  TableHead, TableRow, Paper, Typography, Chip
+  TableHead, TableRow, Paper, Typography, Chip, IconButton
 } from '@mui/material';
+import { Edit, Delete } from '@mui/icons-material';
 
-export default function ViewDayPlanDialog({ open, onClose, date, meals }) {
+export default function ViewDayPlanDialog({ open, onClose, date, meals, onEdit, onDelete }) {
   if (!date || !meals) return null;
 
-  // Format the date nicely for the title
   const formattedDate = new Date(date).toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long'
   });
 
-  // Calculate totals for the day
   const totals = useMemo(() => {
     return meals.reduce((acc, meal) => ({
-      calories: acc.calories + (meal.calories || 0),
-      protein: acc.protein + (meal.protein || 0)
+      calories: acc.calories + (meal.calories || meal.plannedCalories || 0),
+      protein: acc.protein + (meal.protein || meal.plannedProtein || 0)
     }), { calories: 0, protein: 0 });
   }, [meals]);
 
@@ -35,9 +34,22 @@ export default function ViewDayPlanDialog({ open, onClose, date, meals }) {
 
         {meals.map((meal) => (
           <Box key={meal.logId} sx={{ mb: 3 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: 'primary.main' }}>
-              {meal.name}
-            </Typography>
+            
+            {/* Meal Header with Action Buttons */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                {meal.name}
+              </Typography>
+              <Box>
+                <IconButton size="small" color="primary" onClick={() => onEdit(meal)}>
+                  <Edit fontSize="small" />
+                </IconButton>
+                <IconButton size="small" color="error" onClick={() => onDelete(meal)}>
+                  <Delete fontSize="small" />
+                </IconButton>
+              </Box>
+            </Box>
+
             <TableContainer component={Paper} variant="outlined">
               <Table size="small">
                 <TableHead sx={{ bgcolor: '#f5f5f5' }}>
@@ -58,7 +70,12 @@ export default function ViewDayPlanDialog({ open, onClose, date, meals }) {
                     return (
                       <TableRow key={idx}>
                         <TableCell>{ing.name}</TableCell>
-                        <TableCell align="center">{qty} {ing.measurementType === 'count' ? 'x' : 'g'}</TableCell>
+                        <TableCell align="center">
+                          {qty}
+                          <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5, fontWeight: 'bold' }}>
+                            {ing.measurementType === 'count' ? 'items' : 'g'}
+                          </Typography>
+                        </TableCell>
                         <TableCell align="right">{cals}</TableCell>
                         <TableCell align="right">{pro}g</TableCell>
                       </TableRow>
