@@ -286,7 +286,7 @@ export default function Planner() {
           </DialogActions>
         </Dialog>
 
-        <AddDailyMealDialog open={isMealDialogOpen} onClose={() => setIsMealDialogOpen(false)} onAdd={handleAddMealsToDay} />
+        <AddDailyMealDialog open={isMealDialogOpen} onClose={() => setIsMealDialogOpen(false)} onAdd={handleAddMealsToDay} mode="planner" />
         
         {/* Updated props sent to the View Dialog */}
         <ViewDayPlanDialog 
