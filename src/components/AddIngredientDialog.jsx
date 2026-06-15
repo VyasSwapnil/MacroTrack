@@ -1,20 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Button,
-  Box,
-  CircularProgress,
-  Alert
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, Button, Box, CircularProgress, Alert,
+  Radio, RadioGroup, FormControlLabel, FormControl, FormLabel
 } from '@mui/material';
 
 export default function AddIngredientDialog({ open, onClose, onSave, initialData }) {
   const [name, setName] = useState('');
   const [calories, setCalories] = useState('');
   const [protein, setProtein] = useState('');
+  // New state to track the measurement basis
+  const [measurementType, setMeasurementType] = useState('100g'); 
 
   const [errors, setErrors] = useState({ name: '', calories: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -24,6 +20,7 @@ export default function AddIngredientDialog({ open, onClose, onSave, initialData
       setName(initialData.name);
       setCalories(initialData.calories);
       setProtein(initialData.protein);
+      setMeasurementType(initialData.measurementType || '100g'); // Default to 100g for older data
     } else {
       resetForm();
     }
@@ -47,17 +44,18 @@ export default function AddIngredientDialog({ open, onClose, onSave, initialData
 
     if (!isValid) return;
 
+    // Added measurementType to the payload
     const newIngredient = {
       id: initialData ? initialData.id : Date.now(),
-      name: name,
+      name: name.trim(),
       calories: parseFloat(calories) || 0,
-      protein: parseFloat(protein) || 0
+      protein: parseFloat(protein) || 0,
+      measurementType: measurementType 
     };
 
     setIsSubmitting(true);
     try {
       await onSave(newIngredient);
-      
       resetForm();
       onClose();
     } catch (error) {
@@ -77,6 +75,7 @@ export default function AddIngredientDialog({ open, onClose, onSave, initialData
     setName('');
     setCalories('');
     setProtein('');
+    setMeasurementType('100g');
     setErrors({ name: '', calories: '' });
   };
 
@@ -87,12 +86,31 @@ export default function AddIngredientDialog({ open, onClose, onSave, initialData
       </DialogTitle>
       
       <DialogContent>
-        {/* Added Alert to instruct the user about the 100g standard */}
+        {/* Dynamic Instructional Alert */}
         <Alert severity="info" sx={{ mt: 1, mb: 2, borderRadius: 2 }}>
-          Please enter nutritional values based on <strong>100 grams</strong> of this ingredient.
+          {measurementType === '100g' 
+            ? <>Please enter nutritional values based on <strong>100 grams</strong> of this ingredient.</>
+            : <>Please enter nutritional values based on <strong>1 single item</strong> (e.g., 1 whole egg, 1 slice of bread).</>
+          }
         </Alert>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          
+          {/* Measurement Toggle */}
+          <FormControl component="fieldset" disabled={isSubmitting}>
+            <FormLabel component="legend" sx={{ fontSize: '0.85rem', fontWeight: 'bold', mb: 0.5 }}>
+              Measurement Basis
+            </FormLabel>
+            <RadioGroup
+              row
+              value={measurementType}
+              onChange={(e) => setMeasurementType(e.target.value)}
+            >
+              <FormControlLabel value="100g" control={<Radio size="small" />} label="Per 100g" />
+              <FormControlLabel value="count" control={<Radio size="small" />} label="Per Item (Count)" />
+            </RadioGroup>
+          </FormControl>
+
           <TextField
             label="Ingredient Name"
             variant="outlined"
@@ -109,7 +127,7 @@ export default function AddIngredientDialog({ open, onClose, onSave, initialData
             disabled={isSubmitting}
           />
           <TextField
-            label="Calories (per 100g)"
+            label={`Calories (${measurementType === '100g' ? 'per 100g' : 'per item'})`}
             variant="outlined"
             type="number"
             value={calories}
@@ -125,7 +143,7 @@ export default function AddIngredientDialog({ open, onClose, onSave, initialData
             disabled={isSubmitting}
           />
           <TextField
-            label="Protein (g per 100g)"
+            label={`Protein in grams (${measurementType === '100g' ? 'per 100g' : 'per item'})`}
             variant="outlined"
             type="number"
             value={protein}
